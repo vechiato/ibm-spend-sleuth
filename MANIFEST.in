@@ -1,0 +1,11 @@
+# Manifest file for package distribution
+include README.md
+include LICENSE
+include requirements.txt
+include config/filters.yaml.example
+recursive-include src *.py
+recursive-include docs *.md
+recursive-include examples *.py
+recursive-include tests *.py
+recursive-exclude data *
+prune data
