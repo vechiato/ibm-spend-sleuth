@@ -341,6 +341,8 @@ python src/filter_billing.py --instances "*METAL*" --services "*Storage*" --logi
 
 Generate professional Excel reports from YAML planning configurations that map your billing data to planned vs actual costs.
 
+![sample exce sheet](examples/example.png)
+
 ### Setup Planning Configuration
 
 1. **Copy the example configuration**:
