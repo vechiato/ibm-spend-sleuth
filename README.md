@@ -11,13 +11,15 @@ A comprehensive Python toolkit for investigating IBM Cloud billing data with adv
 ## ✨ Features
 
 - **💸 Automatic Currency Conversion**: Convert BRL to USD using actual exchange rates from CSV files (with fallback option)
-- **🔍 Advanced Filtering**: Instance names, services, regions, time periods with wildcard support
-- **📊 Planning Integration**: YAML-based planning with Excel reports and color coding  
+- **🔍 Advanced Multi-Filter System**: 🆕 Combine multiple filter criteria per group with OR logic
+- **📊 Budget-Based Planning Integration**: YAML-based planning with Excel reports and variance analysis
+- **🎯 Uncategorized Cost Detection**: 🆕 Identify billing gaps with complete data coverage analysis
 - **📈 Rich Visualizations**: Charts and graphs for cost analysis and trends
-- **⚡ Quick Analysis**: Fast daily monitoring and alerts
-- **🎯 Flexible Logic**: AND/OR operations for complex filtering scenarios
-- **📋 Professional Reports**: Excel exports with formatting ready for stakeholders
-- **🛠 Multiple Tools**: Command-line, interactive, and programmatic interfaces
+- **⚡ Data Completeness Tracking**: 🆕 Coverage percentage monitoring with actionable insights
+- **🛠 Pattern-Column Filtering**: 🆕 Search any CSV column (Plan Name, Consumer ID, etc.) with wildcard support
+- **📋 Professional Reports**: Excel exports with Data Completeness Analysis sheet and variance tracking
+- **🎛️ Month-Specific Filtering**: 🆕 Time-constrained filters for precise cost allocation
+- **� Multiple Interfaces**: Command-line, interactive, and programmatic access
 
 ## 🎯 Project Motivation
 
@@ -40,7 +42,7 @@ Perfect for organizations managing long-term IBM Cloud infrastructures where per
 ## 🛠️ Setup
 
 ### Prerequisites
-- Python 3.7 or higher
+- Python 3.8 or higher
 - pip (Python package installer)
 
 ### Installation
@@ -81,12 +83,39 @@ python src/quick_analyzer.py
 # 2. Filter specific instances or services
 python src/filter_billing.py --pattern "*your-pattern*"
 
-# 3. Generate visualizations
-python src/visualize_billing.py
+# 3. Advanced multi-filter analysis (New!)
+python src/filter_billing.py --service "Bare Metal" --pattern-column "Plan Name" --pattern "*Ghz*" --months 2025-04
 
-# 4. Create planning Excel report (after setting up config/filters.yaml)
+# 4. Generate comprehensive planning report with data completeness analysis (Enhanced!)
 python src/generate_planning_excel.py --yaml config/filters.yaml --output planning_report.xlsx
+
+# 5. Create visualizations
+python src/visualize_billing.py
 ```
+
+## 🆕 **New Multi-Filter System**
+
+**Revolutionary Enhancement**: Combine multiple filter criteria per cost group with automatic OR logic and complete data coverage analysis.
+
+### **Multi-Filter YAML Configuration**
+```yaml
+groups:
+  - name: Bare Metal Infrastructure
+    months:
+      May-25: 50000    # $50K budget
+      Jun-25: planned  # Unlimited budget
+    filters:           # 🆕 Multiple filters per group
+      - python src/filter_billing.py --instances "bm-prod*, bm-dr*"
+      - python src/filter_billing.py --service "*Bare Metal*" --pattern-column "Plan Name" --pattern "*Ghz*" --months 2025-08
+      - python src/filter_billing.py --pattern "*storage*" --pattern-column "Resource"
+```
+
+### **Key Benefits**
+- **🎯 Complete Coverage**: Uncategorized cost detection ensures no billing data is missed
+- **🔧 Flexible Grouping**: Combine different resource types under logical cost categories  
+- **📊 Data Completeness**: New Excel sheet shows exactly what percentage of costs are categorized
+- **⚡ Smart Logic**: OR logic between filters eliminates double-counting
+- **📅 Time-Specific**: Month constraints for precise cost allocation
 
 ## 📊 Project Structure
 
@@ -274,6 +303,14 @@ Creates:
 - **Instance filtering and search capabilities**
 
 ### Advanced Filtering
+
+**🆕 Multi-Filter System**: Combine multiple filter criteria per group with sophisticated logic
+- **Multiple filters per group** (filters array with OR logic between filters)
+- **Pattern-column filtering** (search any CSV column: Plan Name, Consumer ID, Resource, etc.)
+- **Month-specific filtering** (--months parameter for time-constrained analysis)
+- **Backward compatibility** (supports both single filter and filter2, filter3 syntax)
+
+**Traditional Filtering**: 
 - **Filter by specific instance names** (exact match or wildcards)
 - **Service-based filtering** (analyze specific IBM Cloud services)
 - **Regional filtering** (costs by data center region)
@@ -281,6 +318,8 @@ Creates:
 - **Combined filters** (multiple criteria simultaneously)
 - **Pattern matching** (wildcard search for instance names)
 - **AND/OR Logic** (combine filters with different logic operators)
+
+**🎯 Uncategorized Cost Detection**: Automatic identification of billing records not captured by any filter
 
 ## 💼 Common Use Cases
 
@@ -337,6 +376,32 @@ python src/filter_billing.py --instances "*METAL*" --services "*Storage*" --logi
 # Result: 2,141 records ($79K) - All Metal instances PLUS all Storage services
 ```
 
+### 6. 🆕 **Advanced Multi-Filter Patterns**
+```bash
+# Pattern-column filtering - search any CSV column
+python src/filter_billing.py --pattern "*gateway*" --pattern-column "Plan Name"
+
+# Month-specific bare metal analysis
+python src/filter_billing.py --service "Bare Metal..." --pattern "*Ghz*" --pattern-column "Plan Name" --months 2025-04
+
+# Consumer ID pattern matching
+python src/filter_billing.py --pattern "*pvm-instance*" --pattern-column "Consumer ID"
+
+# Multiple month filtering
+python src/filter_billing.py --instances "*backup*" --months "2025-01,2025-02,2025-03"
+```
+
+### 7. 🎯 **Data Completeness Analysis**
+```bash
+# Generate report with uncategorized cost detection
+python src/generate_planning_excel.py --yaml config/filters.yaml --output comprehensive_report.xlsx
+
+# The generated Excel will include:
+# - Planning Grid (cost allocations)
+# - Budget Variance (over/under budget analysis) 
+# - Data Completeness Analysis (🆕 shows uncategorized costs and coverage %)
+```
+
 ## 📋 YAML-to-Excel Planning Generator
 
 Generate professional Excel reports from YAML planning configurations that map your billing data to planned vs actual costs.
@@ -363,27 +428,99 @@ Generate professional Excel reports from YAML planning configurations that map y
    - **Month Planning**: Set `planned` or `not_planned` for each month per group
    - **Filter Commands**: Update the filter commands to match your actual instance names and services
 
-### Configuration Example
+### Configuration Example 
 Here's how to customize the `config/filters.yaml` file:
 
 ```yaml
 groups:
-  - name: Production Servers    # ← Change to your actual group name
+  # 🆕 Multi-Filter Group Example
+  - name: VMWARE Infrastructure
     months:
-      Jan-25: planned                  # ← Set planned/not_planned per month
+      May-25: 50000    # $50K budget for May
+      Jun-25: planned  # Unlimited budget for June
+    filters:           # 🆕 Multiple filters combined with OR logic
+      - python src/filter_billing.py --instances "vmware-prod*, vmware-dr*"
+      - python src/filter_billing.py --service "Bare Metal..." --pattern "*Ghz*" --pattern-column "Plan Name" --months 2025-04
+      - python src/filter_billing.py --pattern "*storage*" --pattern-column "Resource"
+
+  # Traditional Single Filter (still supported)
+  - name: Production Servers
+    months:
+      Jan-25: planned
       Feb-25: planned
       Mar-25: planned
-      Apr-25: planned
     filter: python src/filter_billing.py --instances "*-PROD-*" --services "*Virtual*"
-    #       ↑ Update this filter to match your actual instance naming pattern
 
-  - name: Development Environment      # ← Another group example
+  # Legacy multi-filter syntax (backward compatible)
+  - name: Development Environment
     months:
-      Jul-25: not_planned             # ← This cost wasn't planned for July
-      Aug-25: planned                 # ← But was planned for August
-      Sep-25: planned
+      Jul-25: not_planned
+      Aug-25: planned
     filter: python src/filter_billing.py --instances "*DEV*" --regions "eu-de-2"
-    #       ↑ Use any valid filter_billing.py command here
+    filter2: python src/filter_billing.py --pattern "*test*" --pattern-column "Consumer ID"
+```
+
+## 💰 Budget-Based Planning (Enhanced)
+
+**New Feature**: Advanced budget management with variance analysis and multi-period support.
+
+### Budget-Based Model
+Instead of simple `planned`/`not_planned` labels, you can now specify actual budget amounts:
+
+```yaml
+groups:
+  - name: AIX Production
+    months:
+      Jan-25: 41200    # $41,200 budget for January
+      Feb-25: 41200    # $41,200 budget for February  
+      Mar-25: 41200    # $41,200 budget for March
+      # Apr-25 onwards: No budget = $0 = fully not_planned
+    filter: python src/filter_billing.py --instances "*ORAPROD*"
+```
+
+### Budget Logic
+- **Actual Cost ≤ Budget**: All cost categorized as `planned`
+- **Actual Cost > Budget**: Budget amount = `planned`, excess = `not_planned`
+- **No Budget Defined**: All cost = `not_planned`
+- **Legacy Format**: `"planned"` = unlimited budget, `"not_planned"` = $0 budget
+
+### Multi-Period Budgets
+Support for quarterly, half-yearly, and annual budgets:
+
+```yaml
+groups:
+  - name: Network Infrastructure
+    months:
+      Q1-25: 180000     # $180K for Q1 = $60K/month (Jan, Feb, Mar)
+      H2-25: 360000     # $360K for H2 = $60K/month (Jul-Dec)
+      Annual-25: 720000 # $720K for year = $60K/month (all months)
+    filter: python src/filter_billing.py --services "Network*"
+```
+
+**Supported Period Formats**:
+- **Monthly**: `Jan-25`, `Feb-25`, `Mar-25`, etc.
+- **Quarterly**: `Q1-25`, `Q2-25`, `Q3-25`, `Q4-25`
+- **Half-Yearly**: `H1-25`, `H2-25`
+- **Annual**: `Annual-25` or `Year-25`
+
+### Budget Variance Analysis
+The Excel report now includes a "Budget Variance" sheet showing:
+- **Budget vs. Actual** comparison for each group/month
+- **Variance Amount** (positive = over budget)
+- **Variance Percentage** 
+- **Status**: Within Budget, Over Budget, Not Planned
+- **Color Coding**: Green (under), Red (over), Yellow (unplanned)
+
+### Example: Mixed Budget Types
+```yaml
+groups:
+  - name: Multi-Budget Example
+    months:
+      Jan-25: 25000      # $25K specific budget
+      Q2-25: 90000       # $90K distributed across Apr/May/Jun  
+      H2-25: 180000      # $180K distributed across Jul-Dec
+      Dec-25: planned    # Legacy unlimited budget
+    filter: python src/filter_billing.py --instances "*example*"
 ```
 
 ### How to Build Filter Commands
@@ -404,6 +541,20 @@ filter: python src/filter_billing.py --instances "*YOUR-PATTERN*" --services "*S
 - By region: `--regions "fra02,eu-de-2"`
 - Combined: `--instances "*AIX*" --services "*Virtual*" --months "2025-08"`
 
+### Budget Configuration Examples
+
+**Quick Start with Budget Model**:
+```bash
+# Use the budget-based example as your starting point
+cp config/filters_budget_example.yaml config/filters.yaml
+```
+
+The budget example (`config/filters_budget_example.yaml`) demonstrates:
+- Monthly, quarterly, half-yearly, and annual budgets
+- Mixed legacy and budget formats
+- Zero budget configurations
+- Multi-period budget distributions
+
 ### Generate Excel Report
 ```bash
 # Generate planning report
@@ -411,16 +562,28 @@ python src/generate_planning_excel.py --yaml config/filters.yaml --output planni
 ```
 
 ### Excel Output Features
-- **Two-Column Structure**: Each month has "Planned" and "Not Planned" columns
-- **Cost Values**: Actual costs displayed in appropriate column based on YAML status
+
+**🆕 Enhanced Multi-Sheet Analysis**:
+- **Planning Grid**: Two-column structure with planned vs not planned costs per month
+- **Budget Variance Sheet**: 🆕 Budget vs actual analysis with over/under indicators
+- **Data Completeness Analysis**: 🆕 Coverage tracking with uncategorized cost breakdown
+- **Summary Analysis**: Total cost aggregations and trends
+
+**Professional Formatting**:
 - **Color Coding**: 
-  - 🟢 Green = Cells with costs in "Planned" columns
-  - 🔴 Red = Cells with costs in "Not Planned" columns (defined in YAML)
-  - 🟡 Yellow = Cells with costs in "Not Planned" columns (undefined in YAML)
-  - ⚪ White = Empty cells (no cost data)
-- **Summary Columns**: Total, Planned, and Not Planned totals per group
-- **Monthly Totals**: Bottom row shows planned vs not planned totals per month
-- **Professional Formatting**: Ready for presentations and reports
+  - 🟢 Green = Planned costs (under/at budget)
+  - 🔴 Red = Not planned costs (over budget/unplanned)
+  - � Orange = Uncategorized costs (⚠️ warning indicators)
+  - ⚪ White = No cost data
+- **Variance Analysis**: Automatic over/under budget calculation with percentages
+- **Coverage Metrics**: Shows what percentage of total billing is categorized
+- **Actionable Insights**: Specific recommendations for improving filter coverage
+
+**🎯 Data Completeness Benefits**:
+- **Complete Coverage**: Ensures no billing data is overlooked
+- **Gap Identification**: Shows exactly which services/resources need filters
+- **Coverage Percentage**: Track improvement as you add filters
+- **Executive Ready**: Professional reporting with comprehensive cost allocation
 
 ### Benefits
 - **Complete Financial Picture**: All costs included, nothing lost
