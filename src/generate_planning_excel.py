@@ -271,6 +271,10 @@ class FilterExecutor:
             combined_monthly_costs = {}
             all_matched_indices = set()
             
+            # Collect all include filter results first, respecting individual month filters
+            include_results = []
+            exclude_results = []
+            
             # Process each filter in the group
             for i, filter_command in enumerate(group.filter_commands):
                 print(f"  Executing filter {i+1}/{len(group.filter_commands)}")
@@ -285,31 +289,66 @@ class FilterExecutor:
                 # Execute the filter using our existing parser
                 analysis = self.parser.get_filtered_analysis(filter_params['filters'], logic=filter_params['logic'])
                 
-                # Track matched records for uncategorized detection
                 if 'filtered_data' in analysis and analysis['filtered_data'] is not None and not analysis['filtered_data'].empty:
-                    # Store indices of matched records
-                    current_matched = set(analysis['filtered_data'].index)
-                    all_matched_indices.update(current_matched)
-                    print(f"    Filter {i+1} matched {len(current_matched)} records")
+                    if filter_params['exclude']:
+                        # Store exclude results for later subtraction
+                        exclude_results.append(analysis['filtered_data'])
+                        print(f"    Filter {i+1} found {len(analysis['filtered_data'])} records to exclude")
+                    else:
+                        # Store include results
+                        include_results.append(analysis['filtered_data'])
+                        current_matched = set(analysis['filtered_data'].index)
+                        all_matched_indices.update(current_matched)
+                        print(f"    Filter {i+1} matched {len(current_matched)} records")
                 else:
-                    print(f"    Filter {i+1} matched 0 records")
-                
-                # Extract monthly costs from this filter
-                if 'monthly_costs' in analysis and analysis['monthly_costs'] is not None and not analysis['monthly_costs'].empty:
-                    monthly_df = analysis['monthly_costs']
-                    for _, row in monthly_df.iterrows():
-                        billing_month = row['Billing Month']  # e.g., "2025-01"
-                        yaml_month = self.month_mapping.get(billing_month, billing_month)  # Convert to "Jan-25"
-                        cost = float(row['Total Cost'])
-                        
-                        # Combine costs from multiple filters (OR logic)
-                        if yaml_month in combined_monthly_costs:
-                            combined_monthly_costs[yaml_month] += cost
-                        else:
-                            combined_monthly_costs[yaml_month] = cost
+                    action = "excluded" if filter_params['exclude'] else "matched"
+                    print(f"    Filter {i+1} {action} 0 records")
             
-            # Store the combined matched records from all filters
-            self.last_matched_records = all_matched_indices
+            # Combine all include filter results (union/OR logic)
+            if include_results:
+                # Concatenate all include results and remove duplicates
+                current_result_data = pd.concat(include_results, ignore_index=True).drop_duplicates().reset_index(drop=True)
+                print(f"  Combined include filters: {len(current_result_data)} total records")
+            else:
+                # No include filters, start with all data
+                current_result_data = self.billing_df.copy()
+                print(f"  No include filters, starting with all data: {len(current_result_data)} records")
+            
+            # Apply exclude filters to the combined result
+            if exclude_results:
+                # Combine all exclude results
+                all_exclude_data = pd.concat(exclude_results, ignore_index=True).drop_duplicates().reset_index(drop=True)
+                
+                # Remove excluded records from the result
+                # We need to match on actual data, not just index since indices may not align
+                merge_cols = ['Account ID', 'Billing Month', 'Service Name', 'Instance Name', 'Cost']
+                available_cols = [col for col in merge_cols if col in current_result_data.columns and col in all_exclude_data.columns]
+                
+                if available_cols:
+                    # Mark rows to exclude
+                    current_result_data = current_result_data.merge(
+                        all_exclude_data[available_cols].assign(_exclude=True),
+                        on=available_cols,
+                        how='left'
+                    )
+                    # Keep only non-excluded rows
+                    excluded_count = current_result_data['_exclude'].sum()
+                    current_result_data = current_result_data[current_result_data['_exclude'] != True].drop('_exclude', axis=1, errors='ignore')
+                    print(f"  Applied exclude filters: removed {excluded_count} records")
+                else:
+                    print("  Warning: Could not apply exclude filters due to column mismatch")
+            
+            # Calculate monthly costs from the final result
+            if not current_result_data.empty:
+                monthly_costs_df = current_result_data.groupby('Billing Month')['Cost'].sum().reset_index()
+                for _, row in monthly_costs_df.iterrows():
+                    billing_month = row['Billing Month']  # e.g., "2025-01"
+                    yaml_month = self.month_mapping.get(billing_month, billing_month)  # Convert to "Jan-25"
+                    cost = float(row['Cost'])
+                    combined_monthly_costs[yaml_month] = cost
+            
+            # Store the matched records from final result
+            self.last_matched_records = set(current_result_data.index) if not current_result_data.empty else set()
             
             # Store actual costs
             group.costs = combined_monthly_costs
@@ -385,6 +424,9 @@ class FilterExecutor:
         if logic_match:
             logic = logic_match.group(1)
         
+        # Extract exclude flag
+        exclude = '--exclude' in args_part
+        
         # Extract months for month-specific filtering
         months_match = re.search(r'--months\s+([^\s]+)', args_part)
         months_filter = None
@@ -393,7 +435,7 @@ class FilterExecutor:
             # Handle both single month and comma-separated months
             months_filter = [month.strip() for month in months_str.split(',')]
         
-        return {'filters': filters, 'logic': logic, 'months': months_filter}
+        return {'filters': filters, 'logic': logic, 'months': months_filter, 'exclude': exclude}
 
     def calculate_uncategorized_costs(self, planning_data: PlanningData, all_matched_records: set) -> PlanningData:
         """

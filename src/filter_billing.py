@@ -180,6 +180,7 @@ def main():
     parser.add_argument('--pattern', help='Wildcard pattern to search (e.g., *oracle*)')
     parser.add_argument('--pattern-column', default='Instance Name', help='Column to apply pattern search (default: Instance Name)')
     parser.add_argument('--logic', choices=['and', 'or'], default='and', help='Logic for combining different filter types: "and" (default) or "or"')
+    parser.add_argument('--exclude', action='store_true', help='Exclude records matching the filters instead of including them')
     parser.add_argument('--export', action='store_true', help='Export results to CSV')
     parser.add_argument('--interactive', action='store_true', help='Run in interactive mode')
     
@@ -222,12 +223,37 @@ def main():
     if not filters:
         print("No filter criteria specified! Use --help for options or --interactive for interactive mode.")
         return
+
+    # Validate month filters early to provide a clearer message if data isn't available
+    if 'Billing Month' in filters:
+        available_months = sorted(data['Billing Month'].unique()) if 'Billing Month' in data.columns else []
+        requested_months = filters['Billing Month'] if isinstance(filters['Billing Month'], list) else [filters['Billing Month']]
+        missing_months = [m for m in requested_months if m not in available_months]
+        if missing_months:
+            print("\n⚠️  Month filter notice:")
+            print(f"  Requested month(s) not found in loaded data: {', '.join(missing_months)}")
+            if available_months:
+                print(f"  Available months in dataset: {', '.join(available_months)}")
+            else:
+                print("  No 'Billing Month' column found in data (unexpected).")
+            # If ALL requested months are missing, abort early to avoid confusion
+            if len(missing_months) == len(requested_months):
+                print("\nNo records to analyze because none of the requested months exist in the current billing CSV set.")
+                print("Add the relevant monthly CSV (e.g., *instances-2025-10.csv) to 'data/billing' and re-run, or adjust --months.")
+                return
+            else:
+                # Keep only the months that actually exist
+                valid_months = [m for m in requested_months if m in available_months]
+                filters['Billing Month'] = valid_months
+                print(f"  Proceeding with existing month(s): {', '.join(valid_months)}")
     
-    print(f"Applying filters: {filters}")
-    analysis = billing_parser.get_filtered_analysis(filters, logic=args.logic)
+    exclude_msg = " (EXCLUDE MODE)" if args.exclude else ""
+    print(f"Applying filters{exclude_msg}: {filters}")
+    analysis = billing_parser.get_filtered_analysis(filters, logic=args.logic, exclude=args.exclude)
     
     if analysis['total_records'] == 0:
-        print("No records found matching the filter criteria!")
+        exclude_msg = "All records excluded by the filter criteria!" if args.exclude else "No records found matching the filter criteria!"
+        print(exclude_msg)
         return
     
     print_filtered_analysis(analysis)

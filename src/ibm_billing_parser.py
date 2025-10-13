@@ -182,6 +182,18 @@ class IBMBillingParser:
             return pd.DataFrame()
         
         if logic == 'or':
+            # Special handling: treat 'Billing Month' as an always-applied (AND) constraint.
+            # Users typically expect --months to LIMIT the dataset even when using OR across other fields.
+            if 'Billing Month' in filters and 'Billing Month' in self.billing_data.columns:
+                month_criteria = filters['Billing Month']
+                month_values = month_criteria if isinstance(month_criteria, list) else [month_criteria]
+                # Restrict base dataframe first
+                base_df = self.billing_data[self.billing_data['Billing Month'].isin(month_values)].copy()
+                # Remove month filter from remaining OR set
+                remaining_filters = {k: v for k, v in filters.items() if k != 'Billing Month'}
+                if not remaining_filters:
+                    return base_df
+                return self._filter_data_or_logic(remaining_filters, base_df=base_df)
             return self._filter_data_or_logic(filters)
         else:
             return self._filter_data_and_logic(filters)
@@ -195,26 +207,52 @@ class IBMBillingParser:
                 print(f"Warning: Column '{column}' not found in data. Available columns: {list(filtered_data.columns)}")
                 continue
             
+            # Check if column is numeric
+            is_numeric = pd.api.types.is_numeric_dtype(filtered_data[column])
+            
             if isinstance(criteria, str):
-                # Handle wildcard patterns
-                if '*' in criteria:
-                    pattern = criteria.replace('*', '.*')
-                    filtered_data = filtered_data[filtered_data[column].str.contains(pattern, case=False, na=False)]
+                if is_numeric:
+                    # Convert string criteria to numeric for comparison
+                    try:
+                        numeric_criteria = pd.to_numeric(criteria)
+                        filtered_data = filtered_data[filtered_data[column] == numeric_criteria]
+                    except (ValueError, TypeError):
+                        # If conversion fails, convert column to string for pattern matching
+                        filtered_data[column] = filtered_data[column].astype(str)
+                        if '*' in criteria:
+                            pattern = criteria.replace('*', '.*')
+                            filtered_data = filtered_data[filtered_data[column].str.contains(pattern, case=False, na=False)]
+                        else:
+                            filtered_data = filtered_data[filtered_data[column].str.contains(f'^{criteria}$', case=False, na=False)]
                 else:
-                    # Exact match (case insensitive)
-                    filtered_data = filtered_data[filtered_data[column].str.contains(f'^{criteria}$', case=False, na=False)]
+                    # Handle wildcard patterns for string columns
+                    if '*' in criteria:
+                        pattern = criteria.replace('*', '.*')
+                        filtered_data = filtered_data[filtered_data[column].str.contains(pattern, case=False, na=False)]
+                    else:
+                        # Exact match (case insensitive)
+                        filtered_data = filtered_data[filtered_data[column].str.contains(f'^{criteria}$', case=False, na=False)]
             elif isinstance(criteria, list):
                 # Multiple values - handle wildcards and exact matches separately
                 mask = pd.Series([False] * len(filtered_data), index=filtered_data.index)
                 
                 for item in criteria:
-                    if '*' in item:
-                        # Wildcard pattern
-                        pattern = item.replace('*', '.*')
-                        item_mask = filtered_data[column].str.contains(pattern, case=False, na=False)
+                    if is_numeric:
+                        # Try numeric comparison first
+                        try:
+                            numeric_item = pd.to_numeric(item)
+                            item_mask = filtered_data[column] == numeric_item
+                        except (ValueError, TypeError):
+                            # Fall back to string comparison
+                            item_mask = filtered_data[column].astype(str).str.contains(f'^{item}$', case=False, na=False)
                     else:
-                        # Exact match
-                        item_mask = filtered_data[column].str.contains(f'^{item}$', case=False, na=False)
+                        if '*' in item:
+                            # Wildcard pattern
+                            pattern = item.replace('*', '.*')
+                            item_mask = filtered_data[column].str.contains(pattern, case=False, na=False)
+                        else:
+                            # Exact match
+                            item_mask = filtered_data[column].str.contains(f'^{item}$', case=False, na=False)
                     
                     mask = mask | item_mask
                 
@@ -225,62 +263,89 @@ class IBMBillingParser:
         
         return filtered_data
     
-    def _filter_data_or_logic(self, filters: Dict) -> pd.DataFrame:
-        """Apply filters with OR logic."""
+    def _filter_data_or_logic(self, filters: Dict, base_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """Apply filters with OR logic. Optionally operate on a restricted base_df."""
+        df = self.billing_data if base_df is None else base_df
+        if df is None or df.empty:
+            return pd.DataFrame()
         if not filters:
-            return self.billing_data.copy()
-        
-        # Create a master mask that starts as False for all rows
-        master_mask = pd.Series([False] * len(self.billing_data), index=self.billing_data.index)
-        
+            return df.copy()
+
+        master_mask = pd.Series([False] * len(df), index=df.index)
+
         for column, criteria in filters.items():
-            if column not in self.billing_data.columns:
-                print(f"Warning: Column '{column}' not found in data. Available columns: {list(self.billing_data.columns)}")
+            if column not in df.columns:
+                print(f"Warning: Column '{column}' not found in data. Available columns: {list(df.columns)}")
                 continue
-            
-            column_mask = pd.Series([False] * len(self.billing_data), index=self.billing_data.index)
-            
+
+            # Check if column is numeric
+            is_numeric = pd.api.types.is_numeric_dtype(df[column])
+            column_mask = pd.Series([False] * len(df), index=df.index)
+
             if isinstance(criteria, str):
-                # Handle wildcard patterns
-                if '*' in criteria:
-                    pattern = criteria.replace('*', '.*')
-                    column_mask = self.billing_data[column].str.contains(pattern, case=False, na=False)
+                if is_numeric:
+                    # Convert string criteria to numeric for comparison
+                    try:
+                        numeric_criteria = pd.to_numeric(criteria)
+                        column_mask = df[column] == numeric_criteria
+                    except (ValueError, TypeError):
+                        # If conversion fails, convert column to string for pattern matching
+                        temp_column = df[column].astype(str)
+                        if '*' in criteria:
+                            pattern = criteria.replace('*', '.*')
+                            column_mask = temp_column.str.contains(pattern, case=False, na=False)
+                        else:
+                            column_mask = temp_column.str.contains(f'^{criteria}$', case=False, na=False)
                 else:
-                    # Exact match (case insensitive)
-                    column_mask = self.billing_data[column].str.contains(f'^{criteria}$', case=False, na=False)
-            elif isinstance(criteria, list):
-                # Multiple values - handle wildcards and exact matches separately
-                for item in criteria:
-                    if '*' in item:
-                        # Wildcard pattern
-                        pattern = item.replace('*', '.*')
-                        item_mask = self.billing_data[column].str.contains(pattern, case=False, na=False)
+                    if '*' in criteria:
+                        pattern = criteria.replace('*', '.*')
+                        column_mask = df[column].str.contains(pattern, case=False, na=False)
                     else:
-                        # Exact match
-                        item_mask = self.billing_data[column].str.contains(f'^{item}$', case=False, na=False)
-                    
+                        column_mask = df[column].str.contains(f'^{criteria}$', case=False, na=False)
+            elif isinstance(criteria, list):
+                for item in criteria:
+                    if is_numeric:
+                        # Try numeric comparison first
+                        try:
+                            numeric_item = pd.to_numeric(item)
+                            item_mask = df[column] == numeric_item
+                        except (ValueError, TypeError):
+                            # Fall back to string comparison
+                            item_mask = df[column].astype(str).str.contains(f'^{item}$', case=False, na=False)
+                    else:
+                        if '*' in item:
+                            pattern = item.replace('*', '.*')
+                            item_mask = df[column].str.contains(pattern, case=False, na=False)
+                        else:
+                            item_mask = df[column].str.contains(f'^{item}$', case=False, na=False)
                     column_mask = column_mask | item_mask
             else:
-                # Direct comparison for numeric values
-                column_mask = self.billing_data[column] == criteria
-            
-            # OR this column's mask with the master mask
+                column_mask = df[column] == criteria
+
             master_mask = master_mask | column_mask
-        
-        return self.billing_data[master_mask]
+
+        return df[master_mask]
     
-    def get_filtered_analysis(self, filters: Dict, logic: str = 'and') -> Dict:
+    def get_filtered_analysis(self, filters: Dict, logic: str = 'and', exclude: bool = False) -> Dict:
         """
         Get comprehensive analysis for filtered data.
         
         Args:
             filters (Dict): Filter criteria
             logic (str): 'and' (default) or 'or' for combining different filter types
+            exclude (bool): If True, exclude records matching the filters instead of including them
             
         Returns:
             Dict: Analysis results for filtered data
         """
-        filtered_data = self.filter_data(filters, logic)
+        if exclude:
+            # For exclusion, get all data first, then remove matching records
+            all_data = self.billing_data.copy()
+            excluded_data = self.filter_data(filters, logic)
+            # Remove excluded records by index
+            filtered_data = all_data.drop(excluded_data.index).reset_index(drop=True)
+        else:
+            filtered_data = self.filter_data(filters, logic)
         
         if filtered_data.empty:
             return {
@@ -289,8 +354,9 @@ class IBMBillingParser:
                 'monthly_costs': pd.DataFrame(),
                 'service_breakdown': pd.DataFrame(),
                 'instance_details': pd.DataFrame(),
-                'summary': "No data found matching the filter criteria.",
-                'logic_used': logic
+                'summary': "No data found matching the filter criteria." if not exclude else "All data excluded by the filter criteria.",
+                'logic_used': logic,
+                'exclude_mode': exclude
             }
         
         # Monthly costs for filtered data
@@ -329,8 +395,9 @@ class IBMBillingParser:
         total_original = filtered_data['Original Cost'].sum()
         total_savings = total_original - total_cost
         
+        mode_text = "EXCLUDE" if exclude else "INCLUDE"
         summary = f"""
-Filtered Analysis Results (Logic: {logic.upper()}):
+Filtered Analysis Results (Logic: {logic.upper()}, Mode: {mode_text}):
 ========================
 Total Records: {len(filtered_data):,}
 Total Cost: {total_cost:,.2f} {self.currency_symbol}
@@ -350,7 +417,8 @@ Date Range: {filtered_data['Billing Month'].min()} to {filtered_data['Billing Mo
             'instance_details': instance_details,
             'summary': summary.strip(),
             'filtered_data': filtered_data,
-            'logic_used': logic
+            'logic_used': logic,
+            'exclude_mode': exclude
         }
 
     def get_cost_summary(self) -> pd.DataFrame:

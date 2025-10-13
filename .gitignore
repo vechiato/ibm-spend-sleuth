@@ -81,3 +81,10 @@ credentials.json
 filters.yaml
 data/filters.yaml
 
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
