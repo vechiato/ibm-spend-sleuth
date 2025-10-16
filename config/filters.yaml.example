@@ -1,89 +1,167 @@
 # Example YAML planning configuration
 # Copy this to filters.yaml and customize for your environment
+#
+# This example showcases:
+# - Multiple filters per group (filters: array)
+# - Exclude logic (--exclude flag)
+# - Pattern-column searches (--pattern-column)
+# - Month-specific filtering (--months)
+# - Budget-based planning (numeric values)
+# - Multi-period budgets (Q1-25, H1-25, Annual-25)
 
 groups:
-  - name: Businsess Unit A
+  # Example 1: Multiple filters per group with OR logic
+  # Combines results from all filters - useful for servers with different naming patterns
+  - name: Business Unit A - All Infrastructure
     months:
-      May-25: planned
-      Jun-25: planned
-      Jul-25: planned
-      Aug-25: planned
-      Sep-25: planned
-      Oct-25: planned
-      Nov-25: planned
-      Dec-25: planned
-    filter: python src/filter_billing.py --instances "BU-A-0*" 
+      Q2-25: 150000    # $150K budget for Q2 (Apr-Jun) = $50K/month
+      Q3-25: 180000    # $180K budget for Q3 (Jul-Sep) = $60K/month
+    filter:
+      - python src/filter_billing.py --service "Bare Metal Servers*"
+      - python src/filter_billing.py --instances "BU-A-DEV-*" --exclude
 
-  - name: Platform Core
-    months:
-      Jan-25: planned
-      Feb-25: planned
-      Mar-25: planned
-      Apr-25: planned
-      May-25: planned
-      Jun-25: planned
-      Jul-25: planned
-      Aug-25: planned
-      Sep-25: planned
-      Oct-25: planned
-      Nov-25: planned
-      Dec-25: planned
-    filter: python src/filter_billing.py --instances "*-CORE-*"
-
-  - name: Product Y
-    months:
-      Jul-25: planned
-      Aug-25: not_planned
-      Sep-25: planned
-      Oct-25: not_planned
-      Nov-25: planned
-      Dec-25: planned
-    filter: python src/filter_billing.py --instances "*-Pdt-Y-0*"
-
-  - name: Product Z
+  # Example 2: Using --exclude to filter out unwanted resources
+  # Gets all Platform resources EXCEPT test/sandbox environments
+  - name: Platform Core (Production Only)
     months:
       Jan-25: planned
       Feb-25: planned
-      Mar-25: planned
-      Apr-25: planned
-      May-25: planned
-      Jun-25: planned
-      Jul-25: planned
-      Aug-25: planned
-      Sep-25: planned
-      Oct-25: planned
-      Nov-25: planned
-      Dec-25: planned
-    filter: python src/filter_billing.py --instances "*-Pdt-Z-7*" --regions "fra02*"
+      Mar-25: 85000    # Switch to budget-based in March
+      Apr-25: 85000
+      May-25: 85000
+      H2-25: 510000    # $510K for H2 (Jul-Dec) = $85K/month
+    filters:
+      - python src/filter_billing.py --instances "*-CORE-*" --exclude --pattern "*-TEST-*,*-SANDBOX-*"
 
-  - name: Project Alpha
+  # Example 3: Multi-filter with pattern-column searches
+  # Handles servers that transition from pre-named to properly named states
+  - name: Bare Metal Infrastructure
     months:
-      Jan-25: planned
-      Feb-25: planned
-      Mar-25: planned
-      Apr-25: planned
-      May-25: not_planned
-      Jun-25: not_planned
-      Jul-25: not_planned
-      Aug-25: not_planned
-      Sep-25: not_planned
-      Oct-25: not_planned
-      Nov-25: not_planned
-      Dec-25: Not_planned
-    filter: python src/filter_billing.py --services "*Storage*" --regions "fra05*" --logic or
+      Jan-25: 75000
+      Feb-25: 75000
+      Q2-25: 240000    # $80K/month for Apr-Jun
+      Q3-25: 240000    # $80K/month for Jul-Sep
+    filters:
+      - python src/filter_billing.py --instances "baremetal-prod-*, baremetal-dr-*"
+      - python src/filter_billing.py --service "Bare Metal Servers*" --pattern-column "Plan Name" --pattern "*Ghz*,*Cores*"
+      - python src/filter_billing.py --pattern "*storage*" --pattern-column "Resource"
 
+  # Example 4: Month-specific filtering for transitional resources
+  # Useful when resources moved between cost centers mid-year
+  - name: Product Y (After Migration)
+    months:
+      Jul-25: planned
+      Aug-25: 45000
+      Sep-25: 45000
+      Q4-25: 150000    # $50K/month for Oct-Dec
+    filters:
+      - python src/filter_billing.py --instances "*-Pdt-Y-*" --months "2025-07,2025-08,2025-09,2025-10,2025-11,2025-12"
+      - python src/filter_billing.py --services "*Storage*" --pattern "*Pdt-Y*" --pattern-column "Instance Name"
+
+  # Example 5: Complex exclude logic with multiple criteria
+  # Get all fra02 resources EXCEPT development and test instances
+  - name: Production Frankfurt (fra02)
+    months:
+      Annual-25: 960000    # $960K annual = $80K/month for all months
+    filter: python src/filter_billing.py --regions "fra02" --exclude --pattern "*-DEV-*,*-TEST-*,*-TEMP-*"
+
+  # Example 6: Service-based filtering with OR logic
+  # Combines different service types into one cost group
+  - name: Storage Services (All Types)
+    months:
+      Jan-25: 25000
+      Feb-25: 25000
+      Q2-25: 90000     # $30K/month for Apr-Jun
+      H2-25: 180000    # $30K/month for Jul-Dec
+    filters:
+      - python src/filter_billing.py --services "Block Storage*, Object Storage*, *File Storage*"
+      - python src/filter_billing.py --pattern "*backup*,*snapshot*" --pattern-column "Instance Name"
+
+  # Example 7: Network & Connectivity with exclude
+  # All network services EXCEPT VPN gateways (billed separately)
+  - name: Network Infrastructure (Excluding VPN)
+    months:
+      H1-25: 120000    # $20K/month for Jan-Jun
+      H2-25: 144000    # $24K/month for Jul-Dec
+    filter: python src/filter_billing.py --services "Network*,Direct Link*,Transit Gateway,Load Balancer*" --logic or --exclude --pattern "*vpn*"
+
+  # Example 8: Consumer ID filtering (for special billing patterns)
+  # Some resources are better identified by Consumer ID
+  - name: Power Virtual Server Instances
+    months:
+      Q1-25: 180000    # $60K/month for Jan-Mar
+      Q2-25: 195000    # $65K/month for Apr-Jun
+      Q3-25: 210000    # $70K/month for Jul-Sep
+    filters:
+      - python src/filter_billing.py --pattern "*pvm-instance*" --pattern-column "Consumer ID"
+      - python src/filter_billing.py --instances "*powervs*"
+
+  # Example 9: Legacy single filter (still supported)
+  # Simple pattern matching for straightforward cases
   - name: Cost Center 1021
     months:
       Jan-25: not_planned
       Feb-25: planned
       Mar-25: planned
-      Apr-25: planned
-      May-25: planned
-      Jun-25: planned
-      Jul-25: not_planned
-      Aug-25: not_planned
-      Sep-25: not_planned
-      Oct-25: not_planned
-      Nov-25: not_planned
-      Dec-25: not_planned
-    filter: python src/filter_billing.py --services "Network,Direct Link*,Transit Gateway" 
+      Q2-25: 150000
+      Q3-25: 165000
+      Q4-25: 180000
+    filter: python src/filter_billing.py --instances "*CC1021*"
+
+  # Example 10: Time-constrained multi-filter with exclusions
+  # Useful for tracking resources that existed only during specific months
+  - name: Project Alpha (Decommissioned Sept)
+    months:
+      Jan-25: 50000
+      Feb-25: 50000
+      Mar-25: 50000
+      Q2-25: 165000    # $55K/month
+      Jul-25: 60000
+      Aug-25: 60000
+      Sep-25: 30000    # Partial month before decommission
+    filters:
+      - python src/filter_billing.py --instances "*ALPHA-*" --months "2025-01,2025-02,2025-03,2025-04,2025-05,2025-06,2025-07,2025-08,2025-09"
+      - python src/filter_billing.py --services "*Virtual*" --pattern "*alpha*" --pattern-column "Instance Name" --exclude --pattern "*backup*"
+
+# Key Features Demonstrated:
+#
+# 1. Multiple Filters (filters: array):
+#    - Combine different patterns with OR logic
+#    - No double-counting - records matched by multiple filters counted once
+#    - Use for resources with inconsistent naming
+#
+# 2. Exclude Logic (--exclude flag):
+#    - Inverse filtering - get everything EXCEPT pattern
+#    - Combine with other criteria for precise filtering
+#    - Useful for "all production except..." scenarios
+#
+# 3. Pattern-Column (--pattern-column):
+#    - Search ANY CSV column (Plan Name, Consumer ID, Resource, etc.)
+#    - Combine with --pattern for targeted searches
+#    - Essential for non-standard billing patterns
+#
+# 4. Month-Specific Filtering (--months):
+#    - Filter by specific billing months
+#    - Format: "2025-01,2025-02" or "2025-01"
+#    - Useful for resource migrations or time-limited projects
+#
+# 5. Budget-Based Planning:
+#    - Numeric values = monthly budgets in USD
+#    - "planned" = unlimited budget
+#    - "not_planned" = zero budget / unbudgeted
+#    - Costs > budget automatically split into planned/not_planned
+#
+# 6. Multi-Period Budgets:
+#    - Q1-25, Q2-25, Q3-25, Q4-25 (quarterly - distributed across 3 months)
+#    - H1-25, H2-25 (half-yearly - distributed across 6 months)
+#    - Annual-25 or Year-25 (annual - distributed across 12 months)
+#
+# Testing Your Filters:
+# Test individual filter commands before adding to YAML:
+#   python src/filter_billing.py --instances "*YOUR-PATTERN*"
+#   python src/filter_billing.py --pattern "*pattern*" --pattern-column "Plan Name"
+#   python src/filter_billing.py --services "*Service*" --exclude --pattern "*test*"
+#
+# Generate Excel Report:
+#   python src/generate_planning_excel.py --yaml config/filters.yaml --output planning_report.xlsx
+ 
