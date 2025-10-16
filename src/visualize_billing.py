@@ -24,6 +24,18 @@ def create_visualizations():
         print("No data to visualize!")
         return
     
+    # Identify and exclude partial months from analysis
+    partial_months = []
+    if 'Is Partial Month' in data.columns:
+        partial_months = data[data['Is Partial Month']]['Billing Month'].unique().tolist()
+        if partial_months:
+            print(f"\n⚠️  Excluding partial month(s) from charts: {', '.join(partial_months)}")
+            data = data[~data['Is Partial Month']].copy()
+    
+    if data.empty:
+        print("No complete months to visualize!")
+        return
+    
     # Set style
     plt.style.use('default')
     sns.set_palette("husl")
@@ -34,8 +46,11 @@ def create_visualizations():
     
     # 1. Monthly costs trend
     monthly_costs = data.groupby('Billing Month')['Cost'].sum().reset_index()
-    ax1.plot(monthly_costs['Billing Month'], monthly_costs['Cost'], marker='o', linewidth=2, markersize=8)
-    ax1.set_title('Monthly Cost Trend', fontweight='bold')
+    
+    ax1.plot(monthly_costs['Billing Month'], monthly_costs['Cost'], 
+             marker='o', linewidth=2, markersize=8, label='Complete', color='#2E86AB')
+    
+    ax1.set_title('Monthly Cost Trend (Complete Months Only)', fontweight='bold')
     ax1.set_xlabel('Month')
     ax1.set_ylabel('Cost (USD)')
     ax1.grid(True, alpha=0.3)
@@ -64,22 +79,25 @@ def create_visualizations():
         autotext.set_color('white')
         autotext.set_fontweight('bold')
     
-    # 4. Service count vs cost scatter
-    service_stats = data.groupby('Service Name').agg({
-        'Cost': 'sum',
-        'Instance Name': 'nunique'
-    }).reset_index()
+    # 4. Monthly cost breakdown by top service groups
+    top_6_services = data.groupby('Service Name')['Cost'].sum().sort_values(ascending=False).head(6).index
+    monthly_service_pivot = data[data['Service Name'].isin(top_6_services)].pivot_table(
+        index='Billing Month',
+        columns='Service Name',
+        values='Cost',
+        aggfunc='sum',
+        fill_value=0
+    )
     
-    scatter = ax4.scatter(service_stats['Instance Name'], service_stats['Cost'], 
-                         alpha=0.6, s=60, c=service_stats['Cost'], cmap='viridis')
-    ax4.set_title('Services: Instance Count vs Total Cost', fontweight='bold')
-    ax4.set_xlabel('Number of Instances')
-    ax4.set_ylabel('Total Cost (USD)')
+    # Create stacked area chart
+    monthly_service_pivot.plot(kind='area', stacked=True, ax=ax4, alpha=0.7)
+    ax4.set_title('Monthly Cost by Service Group', fontweight='bold')
+    ax4.set_xlabel('Month')
+    ax4.set_ylabel('Cost (USD)')
     ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
-    
-    # Add colorbar
-    cbar = plt.colorbar(scatter, ax=ax4)
-    cbar.set_label('Cost (USD)')
+    ax4.tick_params(axis='x', rotation=45)
+    ax4.legend(title='Service', bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+    ax4.grid(True, alpha=0.3, axis='y')
     
     # Adjust layout
     plt.tight_layout()
@@ -95,6 +113,10 @@ def create_visualizations():
     print(f"  • Most expensive service: {top_services.index[0]} ({top_services.iloc[0]:,.2f} USD)")
     print(f"  • Most active region: {region_costs.index[0]} ({region_costs.iloc[0]:,.2f} USD)")
     
+    # Report excluded partial months
+    if partial_months:
+        print(f"\n  ⚠️  Partial months excluded from charts: {', '.join(partial_months)}")
+    
     plt.show()
 
 def monthly_comparison():
@@ -106,17 +128,32 @@ def monthly_comparison():
     if data.empty:
         return
     
+    # Exclude partial months
+    partial_month_list = []
+    if 'Is Partial Month' in data.columns:
+        partial_month_list = data[data['Is Partial Month']]['Billing Month'].unique().tolist()
+        if partial_month_list:
+            print(f"  Excluding partial month(s) from breakdown: {', '.join(partial_month_list)}")
+            data = data[~data['Is Partial Month']].copy()
+    
+    if data.empty:
+        print("  No complete months to display!")
+        return
+    
     # Monthly breakdown by top services
     top_5_services = data.groupby('Service Name')['Cost'].sum().sort_values(ascending=False).head(5).index
     
     monthly_service_data = data[data['Service Name'].isin(top_5_services)].groupby(['Billing Month', 'Service Name'])['Cost'].sum().unstack(fill_value=0)
     
     plt.figure(figsize=(12, 8))
-    monthly_service_data.plot(kind='bar', stacked=True, ax=plt.gca())
-    plt.title('Monthly Cost Breakdown by Top 5 Services', fontsize=14, fontweight='bold')
+    ax = plt.gca()
+    monthly_service_data.plot(kind='bar', stacked=True, ax=ax)
+    
+    plt.title('Monthly Cost Breakdown by Top 5 Services (Complete Months Only)', fontsize=14, fontweight='bold')
     plt.xlabel('Month')
     plt.ylabel('Cost (USD)')
     plt.legend(title='Service', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
     plt.xticks(rotation=45)
     plt.grid(True, alpha=0.3, axis='y')
     

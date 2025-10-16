@@ -65,6 +65,7 @@ Thumbs.db
 # Data directory (contains sensitive billing information)
 data/billing/
 data/outputs/
+data/sample_billing/  # Generated sample data (can be recreated with scripts)
 
 # Test data and outputs
 filtered_*

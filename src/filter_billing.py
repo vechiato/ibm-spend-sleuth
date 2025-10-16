@@ -53,6 +53,85 @@ def print_filtered_analysis(analysis_results):
             print(f"{row['Instance Name']}: {row['Total Cost']:,.2f} USD "
                   f"({row['Service Name']} in {row['Region']})")
 
+def print_detailed_breakdown(filtered_data: pd.DataFrame):
+    """Print detailed line-by-line breakdown of filtered records per month in Excel-friendly format."""
+    if filtered_data.empty:
+        print("\nNo records to display in detailed breakdown.")
+        return
+    
+    print("\n" + "="*80)
+    print("📋 DETAILED BREAKDOWN BY MONTH (Tab-separated for Excel)")
+    print("="*80)
+    
+    # Group by month
+    months = sorted(filtered_data['Billing Month'].unique())
+    
+    for month in months:
+        month_data = filtered_data[filtered_data['Billing Month'] == month]
+        month_total = month_data['Cost'].sum()
+        
+        print(f"\n{'='*80}")
+        print(f"📅 {month} - Total: {month_total:,.2f} USD ({len(month_data)} records)")
+        print(f"{'='*80}")
+        
+        # Sort by cost descending
+        month_data_sorted = month_data.sort_values('Cost', ascending=False)
+        
+        # Print header (tab-separated for Excel)
+        print(f"\nMonth\tInstance Name\tService Name\tCost\tRegion\tPlan Name")
+        
+        # Print each record (tab-separated)
+        for idx, row in month_data_sorted.iterrows():
+            instance = str(row.get('Instance Name', 'N/A'))
+            service = str(row.get('Service Name', 'N/A'))
+            cost = row['Cost']
+            region = str(row.get('Region', '')) if row.get('Region') and str(row.get('Region')) != 'nan' else ''
+            plan = str(row.get('Plan Name', '')) if row.get('Plan Name') and str(row.get('Plan Name')) != 'nan' else ''
+            
+            # Tab-separated output - perfect for Excel
+            print(f"{month}\t{instance}\t{service}\t{cost:.2f}\t{region}\t{plan}")
+
+def save_detailed_breakdown_to_excel(filtered_data: pd.DataFrame, output_file: str):
+    """Save detailed breakdown to Excel file with proper formatting."""
+    if filtered_data.empty:
+        print(f"\n⚠️  No data to save to {output_file}")
+        return
+    
+    # Ensure the file has .xlsx extension
+    if not output_file.endswith('.xlsx'):
+        output_file += '.xlsx'
+    
+    # Prepare data for Excel
+    export_data = []
+    months = sorted(filtered_data['Billing Month'].unique())
+    
+    for month in months:
+        month_data = filtered_data[filtered_data['Billing Month'] == month]
+        month_data_sorted = month_data.sort_values('Cost', ascending=False)
+        
+        for idx, row in month_data_sorted.iterrows():
+            export_data.append({
+                'Month': month,
+                'Instance Name': str(row.get('Instance Name', 'N/A')),
+                'Service Name': str(row.get('Service Name', 'N/A')),
+                'Cost': row['Cost'],
+                'Region': str(row.get('Region', '')) if row.get('Region') and str(row.get('Region')) != 'nan' else '',
+                'Plan Name': str(row.get('Plan Name', '')) if row.get('Plan Name') and str(row.get('Plan Name')) != 'nan' else ''
+            })
+    
+    # Create DataFrame
+    df = pd.DataFrame(export_data)
+    
+    # Export to Excel
+    try:
+        df.to_excel(output_file, index=False, sheet_name='Detailed Breakdown')
+        print(f"\n✅ Detailed breakdown saved to: {output_file}")
+        print(f"   Total records: {len(df):,}")
+        print(f"   Columns: Month, Instance Name, Service Name, Cost, Region, Plan Name")
+    except Exception as e:
+        print(f"\n❌ Error saving to Excel: {e}")
+        print(f"   Note: Make sure openpyxl is installed: pip install openpyxl")
+
 def interactive_filter():
     """Interactive filtering mode."""
     
@@ -183,6 +262,8 @@ def main():
     parser.add_argument('--exclude', action='store_true', help='Exclude records matching the filters instead of including them')
     parser.add_argument('--export', action='store_true', help='Export results to CSV')
     parser.add_argument('--interactive', action='store_true', help='Run in interactive mode')
+    parser.add_argument('--detailed-breakdown', action='store_true', help='Show detailed line-by-line breakdown of all records per month')
+    parser.add_argument('--detailed-output', help='Save detailed breakdown to Excel file (e.g., detailed_breakdown.xlsx)')
     
     args = parser.parse_args()
     
@@ -257,6 +338,14 @@ def main():
         return
     
     print_filtered_analysis(analysis)
+    
+    # Add detailed breakdown if requested
+    if args.detailed_breakdown:
+        print_detailed_breakdown(analysis['filtered_data'])
+    
+    # Save detailed breakdown to Excel if output file specified
+    if args.detailed_output:
+        save_detailed_breakdown_to_excel(analysis['filtered_data'], args.detailed_output)
     
     # Export if requested
     if args.export:

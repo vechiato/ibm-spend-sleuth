@@ -45,8 +45,15 @@ def quick_analysis():
     # Monthly trend
     print(f"\n📈 Monthly Costs:")
     monthly = data.groupby('Billing Month')['Cost'].sum().sort_index()
+    
+    # Track partial months for display
+    partial_months_in_data = set()
+    if 'Is Partial Month' in data.columns:
+        partial_months_in_data = set(data[data['Is Partial Month']]['Billing Month'].unique())
+    
     for month, cost in monthly.items():
-        print(f"  {month}: {cost:,.2f} USD")
+        partial_indicator = " ⚠️ (Partial)" if month in partial_months_in_data else ""
+        print(f"  {month}: {cost:,.2f} USD{partial_indicator}")
 
 def main():
     """Main function with command line arguments."""

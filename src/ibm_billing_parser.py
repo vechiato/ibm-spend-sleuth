@@ -44,6 +44,7 @@ class IBMBillingParser:
         self.convert_to_usd = convert_to_usd
         self.exchange_rate = exchange_rate
         self.currency_symbol = "USD" if convert_to_usd else "BRL"
+        self.partial_months = {}  # Track partial/incomplete months
         
     def find_csv_files(self) -> List[str]:
         """
@@ -56,6 +57,49 @@ class IBMBillingParser:
         self.csv_files = glob.glob(pattern)
         self.csv_files.sort()  # Sort by filename (which includes date)
         return self.csv_files
+    
+    def _is_partial_month(self, metadata: Dict) -> bool:
+        """
+        Determine if a billing CSV represents a partial (incomplete) month.
+        
+        A month is considered partial if the CSV creation date is within the billing month.
+        A month is complete if the CSV was created in a subsequent month.
+        
+        Args:
+            metadata (Dict): CSV metadata containing 'Billing Month' and 'Created Time'
+            
+        Returns:
+            bool: True if partial/incomplete, False if complete
+        
+        Example:
+            Billing Month: "2025-09", Created Time: "2025-10-06..." -> Complete (False)
+            Billing Month: "2025-10", Created Time: "2025-10-16..." -> Partial (True)
+        """
+        try:
+            billing_month = metadata.get('Billing Month', '')
+            # Try both possible field names
+            creation_date = metadata.get('Created Time', '') or metadata.get('Creation Date', '')
+            
+            if not billing_month or not creation_date:
+                return False  # Can't determine, assume complete
+            
+            # Parse billing month (format: YYYY-MM)
+            billing_year, billing_month_num = map(int, billing_month.split('-'))
+            
+            # Parse creation date (format: YYYY-MM-DDTHH:MM:SS.sssZ)
+            creation_datetime = datetime.fromisoformat(creation_date.replace('Z', '+00:00'))
+            creation_year = creation_datetime.year
+            creation_month = creation_datetime.month
+            
+            # If CSV was created in the same month as billing month, it's partial
+            # If CSV was created in a later month, it's complete
+            is_partial = (creation_year == billing_year and creation_month == billing_month_num)
+            
+            return is_partial
+            
+        except (ValueError, AttributeError) as e:
+            # If parsing fails, assume complete to avoid false warnings
+            return False
     
     def parse_single_csv(self, file_path: str) -> Tuple[pd.DataFrame, Dict]:
         """
@@ -83,6 +127,15 @@ class IBMBillingParser:
                     if key and value:
                         metadata[key] = value
             
+            # Detect if this is a partial/incomplete month
+            is_partial = self._is_partial_month(metadata)
+            metadata['Is Partial'] = is_partial
+            
+            # Track partial months for reporting
+            if 'Billing Month' in metadata and is_partial:
+                creation_date = metadata.get('Created Time', '') or metadata.get('Creation Date', '')
+                self.partial_months[metadata['Billing Month']] = creation_date
+            
             # Read the actual billing data starting from line 4 (index 3)
             # Skip the empty line (index 2) and use line 4 as headers
             billing_df = pd.read_csv(file_path, skiprows=3, encoding='utf-8')
@@ -90,6 +143,8 @@ class IBMBillingParser:
             # Add billing month from metadata
             if 'Billing Month' in metadata:
                 billing_df['Billing Month'] = metadata['Billing Month']
+                # Mark partial months in the dataframe
+                billing_df['Is Partial Month'] = is_partial
             
             # Clean and convert numeric columns
             numeric_columns = ['Usage Quantity', 'Original Cost', 'Volume Cost', 'Cost', 'Currency Rate']
@@ -155,6 +210,13 @@ class IBMBillingParser:
             self.billing_data = pd.concat(all_data, ignore_index=True)
             self.account_metadata = all_metadata
             print(f"Successfully loaded {len(self.billing_data)} billing records")
+            
+            # Report partial months
+            if self.partial_months:
+                print(f"\n⚠️  Partial/Incomplete Months Detected:")
+                for month, creation_date in sorted(self.partial_months.items()):
+                    print(f"  {month} (CSV created: {creation_date[:10]})")
+                print("  Note: These months may have incomplete billing data.\n")
         else:
             print("No data loaded!")
             self.billing_data = pd.DataFrame()
