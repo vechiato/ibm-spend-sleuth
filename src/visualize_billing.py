@@ -8,12 +8,87 @@ Creates charts and graphs for IBM billing data analysis.
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import os
+import sys
 try:
     from .ibm_billing_parser import IBMBillingParser
+    from .generate_planning_excel import YAMLPlanningParser, FilterExecutor
 except ImportError:
     from ibm_billing_parser import IBMBillingParser
+    from generate_planning_excel import YAMLPlanningParser, FilterExecutor
 
-def create_visualizations():
+def load_planning_data(yaml_file='config/filters.yaml'):
+    """
+    Load planned vs unplanned data from YAML configuration.
+    Returns DataFrame with columns: Billing Month, Planned Cost, Not Planned Cost
+    """
+    if yaml_file is None or not os.path.exists(yaml_file):
+        return None
+    
+    try:
+        # Parse YAML configuration
+        parser = YAMLPlanningParser(yaml_file)
+        planning_data = parser.parse()
+        
+        # Execute filters for each group
+        executor = FilterExecutor("data/billing")
+        executor.load_billing_data()
+        
+        # Calculate costs for each group
+        for group in planning_data.groups:
+            monthly_costs = executor.execute_group_filter(group)
+            group.costs = monthly_costs
+            
+            # Calculate planned vs not_planned based on budget allocations
+            for month in planning_data.all_months:
+                actual_cost = group.costs.get(month, 0.0)
+                budget = group.budget_allocations.get(month, 0.0)
+                
+                if budget == 0:
+                    # No budget = fully not_planned
+                    group.planned_costs[month] = 0.0
+                    group.not_planned_costs[month] = actual_cost
+                elif budget == float('inf'):
+                    # Unlimited budget (legacy "planned") = fully planned
+                    group.planned_costs[month] = actual_cost
+                    group.not_planned_costs[month] = 0.0
+                elif actual_cost <= budget:
+                    # Within budget = fully planned
+                    group.planned_costs[month] = actual_cost
+                    group.not_planned_costs[month] = 0.0
+                else:
+                    # Over budget = budget portion planned, excess not_planned
+                    group.planned_costs[month] = budget
+                    group.not_planned_costs[month] = actual_cost - budget
+        
+        # Aggregate across all groups by month
+        monthly_planning = {}
+        for group in planning_data.groups:
+            for month in planning_data.all_months:
+                if month not in monthly_planning:
+                    monthly_planning[month] = {'planned': 0, 'not_planned': 0}
+                monthly_planning[month]['planned'] += group.planned_costs.get(month, 0)
+                monthly_planning[month]['not_planned'] += group.not_planned_costs.get(month, 0)
+        
+        # Convert to DataFrame - only include months with actual data (non-zero costs)
+        df_data = []
+        for month in sorted(monthly_planning.keys()):
+            total_cost = monthly_planning[month]['planned'] + monthly_planning[month]['not_planned']
+            if total_cost > 0:  # Only include months with actual billing data
+                df_data.append({
+                    'Billing Month': month,
+                    'Planned': monthly_planning[month]['planned'],
+                    'Not Planned': monthly_planning[month]['not_planned']
+                })
+        
+        return pd.DataFrame(df_data) if df_data else None
+        
+    except Exception as e:
+        print(f"Warning: Could not load planning data: {e}")
+        return None
+
+
+def create_visualizations(yaml_config='config/filters.yaml'):
     """Create various visualizations for billing data."""
     
     # Load data
@@ -79,25 +154,42 @@ def create_visualizations():
         autotext.set_color('white')
         autotext.set_fontweight('bold')
     
-    # 4. Monthly cost breakdown by top service groups
-    top_6_services = data.groupby('Service Name')['Cost'].sum().sort_values(ascending=False).head(6).index
-    monthly_service_pivot = data[data['Service Name'].isin(top_6_services)].pivot_table(
-        index='Billing Month',
-        columns='Service Name',
-        values='Cost',
-        aggfunc='sum',
-        fill_value=0
-    )
+    # 4. Planned vs Not Planned costs (if YAML config available), else service breakdown
+    planning_data = load_planning_data(yaml_config)
     
-    # Create stacked area chart
-    monthly_service_pivot.plot(kind='area', stacked=True, ax=ax4, alpha=0.7)
-    ax4.set_title('Monthly Cost by Service Group', fontweight='bold')
-    ax4.set_xlabel('Month')
-    ax4.set_ylabel('Cost (USD)')
-    ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
-    ax4.tick_params(axis='x', rotation=45)
-    ax4.legend(title='Service', bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-    ax4.grid(True, alpha=0.3, axis='y')
+    if planning_data is not None and not planning_data.empty:
+        # Show planned vs not planned stacked bar chart
+        planning_pivot = planning_data.set_index('Billing Month')
+        
+        planning_pivot.plot(kind='bar', stacked=True, ax=ax4, 
+                           color=['#28a745', '#dc3545'], alpha=0.8)
+        ax4.set_title('Planned vs Not Planned Costs', fontweight='bold')
+        ax4.set_xlabel('Month')
+        ax4.set_ylabel('Cost (USD)')
+        ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
+        ax4.tick_params(axis='x', rotation=45)
+        ax4.legend(title='Status', loc='upper left')
+        ax4.grid(True, alpha=0.3, axis='y')
+    else:
+        # Fallback to service breakdown if no planning data
+        top_6_services = data.groupby('Service Name')['Cost'].sum().sort_values(ascending=False).head(6).index
+        monthly_service_pivot = data[data['Service Name'].isin(top_6_services)].pivot_table(
+            index='Billing Month',
+            columns='Service Name',
+            values='Cost',
+            aggfunc='sum',
+            fill_value=0
+        )
+        
+        # Create stacked area chart
+        monthly_service_pivot.plot(kind='area', stacked=True, ax=ax4, alpha=0.7)
+        ax4.set_title('Monthly Cost by Service Group', fontweight='bold')
+        ax4.set_xlabel('Month')
+        ax4.set_ylabel('Cost (USD)')
+        ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
+        ax4.tick_params(axis='x', rotation=45)
+        ax4.legend(title='Service', bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+        ax4.grid(True, alpha=0.3, axis='y')
     
     # Adjust layout
     plt.tight_layout()
@@ -167,8 +259,14 @@ def monthly_comparison():
 
 def main():
     """Main function."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Generate IBM Cloud billing visualizations.')
+    parser.add_argument('--yaml', help='Path to YAML config file for budget planning (optional)')
+    args = parser.parse_args()
+    
     print("Creating IBM Cloud Billing Visualizations...")
-    create_visualizations()
+    create_visualizations(yaml_config=args.yaml)
     print("\nCreating monthly comparison...")
     monthly_comparison()
     print("\n✅ All visualizations complete!")
